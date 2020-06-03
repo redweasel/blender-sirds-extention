@@ -1,0 +1,851 @@
+diff --git a/release/scripts/startup/nodeitems_builtins.py b/release/scripts/startup/nodeitems_builtins.py
+index 2dc6c6cd409..c65fd725fcf 100644
+--- a/release/scripts/startup/nodeitems_builtins.py
++++ b/release/scripts/startup/nodeitems_builtins.py
+@@ -371,6 +371,7 @@ compositor_node_categories = [
+         NodeItem("CompositorNodePixelate"),
+         NodeItem("CompositorNodeSunBeams"),
+         NodeItem("CompositorNodeDenoise"),
++        NodeItem("CompositorNodeSIRDS"),
+     ]),
+     CompositorNodeCategory("CMP_OP_VECTOR", "Vector", items=[
+         NodeItem("CompositorNodeNormal"),
+diff --git a/source/blender/blenkernel/BKE_node.h b/source/blender/blenkernel/BKE_node.h
+index 536d04f8bd3..282f5135e30 100644
+--- a/source/blender/blenkernel/BKE_node.h
++++ b/source/blender/blenkernel/BKE_node.h
+@@ -1152,6 +1152,7 @@ void ntreeGPUMaterialNodes(struct bNodeTree *localtree,
+ #define CMP_NODE_SWITCH_VIEW 322
+ #define CMP_NODE_CRYPTOMATTE 323
+ #define CMP_NODE_DENOISE 324
++#define CMP_NODE_SIRDS 325
+ 
+ /* channel toggles */
+ #define CMP_CHAN_RGB 1
+diff --git a/source/blender/blenkernel/intern/node.c b/source/blender/blenkernel/intern/node.c
+index 48c6727add5..13c148c4496 100644
+--- a/source/blender/blenkernel/intern/node.c
++++ b/source/blender/blenkernel/intern/node.c
+@@ -4088,6 +4088,7 @@ static void registerCompositNodes(void)
+   register_node_type_cmp_defocus();
+   register_node_type_cmp_sunbeams();
+   register_node_type_cmp_denoise();
++  register_node_type_cmp_sirds();
+ 
+   register_node_type_cmp_valtorgb();
+   register_node_type_cmp_rgbtobw();
+diff --git a/source/blender/compositor/CMakeLists.txt b/source/blender/compositor/CMakeLists.txt
+index d524f4a0e1e..8aff82157bd 100644
+--- a/source/blender/compositor/CMakeLists.txt
++++ b/source/blender/compositor/CMakeLists.txt
+@@ -292,6 +292,8 @@ set(SRC
+   nodes/COM_FilterNode.h
+   nodes/COM_InpaintNode.cpp
+   nodes/COM_InpaintNode.h
++  nodes/COM_SIRDSNode.cpp
++  nodes/COM_SIRDSNode.h
+   operations/COM_BlurBaseOperation.cpp
+   operations/COM_BlurBaseOperation.h
+   operations/COM_BokehBlurOperation.cpp
+@@ -316,6 +318,8 @@ set(SRC
+   operations/COM_MovieClipAttributeOperation.h
+   operations/COM_MovieDistortionOperation.cpp
+   operations/COM_MovieDistortionOperation.h
++  operations/COM_SIRDSOperation.cpp
++  operations/COM_SIRDSOperation.h
+   operations/COM_VariableSizeBokehBlurOperation.cpp
+   operations/COM_VariableSizeBokehBlurOperation.h
+ 
+diff --git a/source/blender/compositor/intern/COM_Converter.cpp b/source/blender/compositor/intern/COM_Converter.cpp
+index edfeb3a3a04..655d25db926 100644
+--- a/source/blender/compositor/intern/COM_Converter.cpp
++++ b/source/blender/compositor/intern/COM_Converter.cpp
+@@ -95,6 +95,7 @@
+ #include "COM_SeparateColorNode.h"
+ #include "COM_SetAlphaNode.h"
+ #include "COM_SetValueOperation.h"
++#include "COM_SIRDSNode.h"
+ #include "COM_SplitViewerNode.h"
+ #include "COM_Stabilize2dNode.h"
+ #include "COM_SunBeamsNode.h"
+@@ -404,6 +405,9 @@ Node *Converter::convert(bNode *b_node)
+     case CMP_NODE_DENOISE:
+       node = new DenoiseNode(b_node);
+       break;
++    case CMP_NODE_SIRDS:
++      node = new SIRDSNode(b_node);
++      break;
+   }
+   return node;
+ }
+diff --git a/source/blender/compositor/nodes/COM_SIRDSNode.cpp b/source/blender/compositor/nodes/COM_SIRDSNode.cpp
+new file mode 100644
+index 00000000000..ee12d11b30b
+--- /dev/null
++++ b/source/blender/compositor/nodes/COM_SIRDSNode.cpp
+@@ -0,0 +1,46 @@
++/* This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ * Copyright 2014, Blender Foundation.
++ */
++
++#include "COM_SIRDSNode.h"
++#include "COM_SIRDSOperation.h"
++
++SIRDSNode::SIRDSNode(bNode *editorNode) : Node(editorNode)
++{
++  /* pass */
++}
++
++void SIRDSNode::convertToOperations(NodeConverter &converter,
++                                    const CompositorContext & /*context*/) const
++{
++  NodeSIRDS *data = (NodeSIRDS *)getbNode()->storage;
++
++  NodeInput *inputSocketImage = this->getInputSocket(0);
++  NodeInput *inputSocketDepth = this->getInputSocket(1);
++  NodeOutput *outputSocketImage = this->getOutputSocket(0);
++
++  SIRDSOperation *operation = new SIRDSOperation();
++  operation->setData(*data);
++  converter.addOperation(operation);
++
++  converter.mapInputSocket(inputSocketImage, operation->getInputSocket(0));
++  converter.mapInputSocket(inputSocketDepth, operation->getInputSocket(1));
++  converter.mapInputSocket(this->getInputSocket(2), operation->getInputSocket(2));
++  converter.mapInputSocket(this->getInputSocket(3), operation->getInputSocket(3));
++  converter.mapInputSocket(this->getInputSocket(4), operation->getInputSocket(4));
++  converter.mapInputSocket(this->getInputSocket(5), operation->getInputSocket(5));
++  converter.mapOutputSocket(outputSocketImage, operation->getOutputSocket(0));
++}
+diff --git a/source/blender/compositor/nodes/COM_SIRDSNode.h b/source/blender/compositor/nodes/COM_SIRDSNode.h
+new file mode 100644
+index 00000000000..36a387eb615
+--- /dev/null
++++ b/source/blender/compositor/nodes/COM_SIRDSNode.h
+@@ -0,0 +1,33 @@
++/* This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ * Copyright 2014, Blender Foundation.
++ */
++
++#ifndef __COM_SIRDSNODE_H__
++#define __COM_SIRDSNODE_H__
++
++#include "COM_Node.h"
++
++/**
++ * \brief SIRDSNode
++ * \ingroup Node
++ */
++class SIRDSNode : public Node {
++ public:
++  SIRDSNode(bNode *editorNode);
++  void convertToOperations(NodeConverter &converter, const CompositorContext &context) const;
++};
++
++#endif
+diff --git a/source/blender/compositor/operations/COM_SIRDSOperation.cpp b/source/blender/compositor/operations/COM_SIRDSOperation.cpp
+new file mode 100644
+index 00000000000..6f71af3aa3f
+--- /dev/null
++++ b/source/blender/compositor/operations/COM_SIRDSOperation.cpp
+@@ -0,0 +1,398 @@
++/* This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ * Copyright 2014, Blender Foundation.
++ */
++
++#include "MEM_guardedalloc.h"
++
++#include "COM_SIRDSOperation.h"
++
++/* Forward declarations. */
++float zbuf_depth_map(float depth,
++                     const float view_plane_distance,
++                     const float eye_distance_px,
++                     bool flip_z);
++void zbuf_accumulate_sirds(NodeSIRDS *nsirds,
++                           int width,
++                           int height,
++                           SocketReader *centerReader,
++                           float *outbuf,
++                           const float *imgbuf,
++                           const float *zbuf);
++
++SIRDSOperation::SIRDSOperation() : NodeOperation()
++{
++  this->addInputSocket(COM_DT_COLOR);
++  this->addInputSocket(COM_DT_VALUE);
++  this->addInputSocket(COM_DT_VALUE);
++  this->addInputSocket(COM_DT_VALUE);
++  this->addInputSocket(COM_DT_VALUE);
++  this->addInputSocket(COM_DT_VALUE);
++  this->addOutputSocket(COM_DT_COLOR);
++  this->setResolutionInputSocketIndex(1);
++
++  this->setComplex(true);
++
++  this->m_cachedInstance = NULL;
++  this->m_patternReader = NULL;
++  this->m_depthReader = NULL;
++  this->m_clipstartReader = NULL;
++  this->m_clipendReader = NULL;
++  this->m_fovReader = NULL;
++  this->m_centerReader = NULL;
++}
++
++void SIRDSOperation::initExecution()
++{
++  initMutex();
++  this->m_patternReader = this->getInputSocketReader(0);
++  this->m_depthReader = this->getInputSocketReader(1);
++  this->m_clipstartReader = this->getInputSocketReader(2);
++  this->m_clipendReader = this->getInputSocketReader(3);
++  this->m_fovReader = this->getInputSocketReader(4);
++  this->m_centerReader = this->getInputSocketReader(5);
++  this->m_cachedInstance = NULL;
++}
++
++void SIRDSOperation::executePixel(float output[4], int x, int y, void *data)
++{
++  float *buffer = (float *)data;
++  int index = (y * this->getWidth() + x) * COM_NUM_CHANNELS_COLOR;
++  copy_v4_v4(output, &buffer[index]);
++}
++
++void SIRDSOperation::deinitExecution()
++{
++  deinitMutex();
++  this->m_patternReader = NULL;
++  this->m_depthReader = NULL;
++  this->m_clipstartReader = NULL;
++  this->m_clipendReader = NULL;
++  this->m_fovReader = NULL;
++  this->m_centerReader = NULL;
++  if (this->m_cachedInstance) {
++    MEM_freeN(this->m_cachedInstance);
++    this->m_cachedInstance = NULL;
++  }
++}
++
++void *SIRDSOperation::initializeTileData(rcti *rect)
++{
++  if (this->m_cachedInstance) {
++    return this->m_cachedInstance;
++  }
++
++  lockMutex();
++  if (this->m_cachedInstance == NULL) {
++    MemoryBuffer *tile = NULL;
++    tile = (MemoryBuffer *)this->m_patternReader->initializeTileData(rect);
++    MemoryBuffer *z = (MemoryBuffer *)this->m_depthReader->initializeTileData(rect);
++    float *data = (float *)MEM_dupallocN(tile->getBuffer());
++
++    float out[4];
++    this->m_clipstartReader->readSampled(out, 0, 0, COM_PS_NEAREST);
++    this->m_data.clip_near = out[0];
++    this->m_clipendReader->readSampled(out, 0, 0, COM_PS_NEAREST);
++    this->m_data.clip_far = out[0];
++    this->m_fovReader->readSampled(out, 0, 0, COM_PS_NEAREST);
++    this->m_data.camera_fov = out[0];
++
++    this->generateSIRDS(data, tile, z);
++    this->m_cachedInstance = data;
++  }
++  unlockMutex();
++  return this->m_cachedInstance;
++}
++
++bool SIRDSOperation::determineDependingAreaOfInterest(rcti * /*input*/,
++                                                      ReadBufferOperation *readOperation,
++                                                      rcti *output)
++{
++  if (this->m_cachedInstance == NULL) {
++    rcti newInput;
++    newInput.xmax = this->getWidth();
++    newInput.xmin = 0;
++    newInput.ymax = this->getHeight();
++    newInput.ymin = 0;
++    return NodeOperation::determineDependingAreaOfInterest(&newInput, readOperation, output);
++  }
++  else {
++    return false;
++  }
++}
++
++void SIRDSOperation::generateSIRDS(float *data, MemoryBuffer *inputImage, MemoryBuffer *inputZ)
++{
++  zbuf_accumulate_sirds(&m_data,
++                        this->getWidth(),
++                        this->getHeight(),
++                        this->m_centerReader,
++                        data,
++                        inputImage->getBuffer(),
++                        inputZ->getBuffer());
++  return;
++}
++
++float zbuf_depth_map(float depth,
++                     const float view_plane_distance,
++                     const float eye_distance_px,
++                     bool flip_z)
++{
++  if (flip_z) {
++    return depth / (depth - view_plane_distance) * eye_distance_px;
++  }
++  else {
++    return (depth - view_plane_distance) / depth * eye_distance_px;
++  }
++}
++
++void zbuf_accumulate_sirds(NodeSIRDS *nsirds,
++                           int width,
++                           int height,
++                           SocketReader *centerReader,
++                           float *outbuf,
++                           const float *imgbuf,
++                           const float *zbuf)
++{
++  const float eye_distance = 0.064f;
++
++  const float eye_distance_px = width * eye_distance / nsirds->view_width;
++
++  const bool flip_z = !!(nsirds->flag & CMP_NODEFLAG_SIRDS_INVERT_Z);
++  const bool elastic = !!(nsirds->flag & CMP_NODEFLAG_SIRDS_ELASTIC);
++
++  const float near_plane_distance = nsirds->clip_near;
++  const float far_plane_distance = fmaxf(near_plane_distance, nsirds->clip_far);
++  const float mean_distance = (near_plane_distance + far_plane_distance) / 2;
++
++  const float image_width_scene = tanf(nsirds->camera_fov / 2) * 2 * mean_distance;
++  const float view_plane_distance = nsirds->view_width *
++                                    (image_width_scene / nsirds->view_distance);
++
++  float width_tile_min = fabsf(
++      zbuf_depth_map(near_plane_distance, view_plane_distance, eye_distance_px, flip_z));
++  float width_tile_max = fabsf(
++      zbuf_depth_map(far_plane_distance, view_plane_distance, eye_distance_px, flip_z));
++  if (width_tile_min > width_tile_max) {
++    SWAP(float, width_tile_min, width_tile_max);
++  }
++  const unsigned int width_tile = round_fl_to_int(clamp_f(fabsf(width_tile_max), 3, width / 2));
++
++  const unsigned int x_center_base = (width - width_tile) / 2;
++  const unsigned int x_tile_center = width_tile / 2;
++
++  const float biggest_shift = width_tile_max - width_tile_min;
++
++  int *links = (int *)MEM_malloc_arrayN(width, sizeof(*links), "sirds links array");
++  float *depth_left = (float *)MEM_malloc_arrayN(
++      width, sizeof(*depth_left), "sirds depth_left array");
++  float *depth_right = (float *)MEM_malloc_arrayN(
++      width, sizeof(*depth_right), "sirds depth_right array");
++  float *reorder = (float *)MEM_malloc_arrayN(width_tile, sizeof(*reorder), "sirds reorder array");
++  float *reorder_priority = (float *)MEM_malloc_arrayN(
++      width_tile, sizeof(*reorder_priority), "sirds reorder_priority array");
++  float *border = (float *)MEM_malloc_arrayN(width, sizeof(*border), "sirds border array");
++
++  /* Apply filter line after line. */
++  for (int y = 0; y < height; y++) {
++    float out[4];
++    centerReader->readSampled(out, 0, y, COM_PS_NEAREST);
++    unsigned int x_center = (width - width_tile) * out[0];
++    int line_offset = y * width;
++    float scale = 1.0f;
++
++    int visible_width = width_tile;
++    if (elastic) {
++      /* determine center row scale */
++      if (biggest_shift > 0) {
++        float max_depth = near_plane_distance;
++        float min_depth = far_plane_distance;
++        for (int x = 0; x < width; x++) {
++          float depth = zbuf[x + line_offset];
++          max_depth = max_ff(max_depth, depth);
++          min_depth = min_ff(min_depth, depth);
++        }
++        visible_width = max_ff(
++            fabsf(zbuf_depth_map(max_depth, view_plane_distance, eye_distance_px, flip_z)),
++            fabsf(zbuf_depth_map(min_depth, view_plane_distance, eye_distance_px, flip_z)));
++        scale = width_tile / (float)visible_width;
++      }
++    }
++
++    /* Reset links. */
++    for (int x = 0; x < width; x++) {
++      links[x] = x % width_tile;
++      depth_left[x] = far_plane_distance;
++      depth_right[x] = far_plane_distance;
++    }
++    for (int x = 0; x < width_tile; x++) {
++      reorder[x] = x;
++    }
++    memset(reorder_priority, 0, width_tile * sizeof(*reorder_priority));
++    /* Make links by depth. */
++    for (int i = 0; i < 1; i++) {
++      for (int j = 0; j < width - 1 - width_tile_min; j++) {
++        int x_int = (j + x_center) % (int)(width - 1 - width_tile_min / 2);
++        if (x_int < x_center) {
++          x_int = x_center - x_int;
++        }
++        float depth1 = zbuf[x_int + line_offset];
++        float depth2 = zbuf[x_int + 1 + line_offset];
++        /* Make pairs in subpixel precision. */
++        for (float k = 0.0f; k < 1.0f; k += 0.2f) {
++          float x = x_int + k;
++          float depth = fabsf(depth1 - depth2) < 0.1f ?
++                            depth1 + (depth2 - depth1) * k :
++                            depth1;
++          depth = clamp_f(depth, near_plane_distance, far_plane_distance);
++          float link_width = fabsf(
++              zbuf_depth_map(depth, view_plane_distance, eye_distance_px, flip_z));
++          float center = link_width / 2.0f;
++          if (x > x_center) {
++            /* Right side. */
++            if (x + center <= width - 1 && x - center >= 0) {
++              int index_dest = round_fl_to_int(x + center);
++              int index_src = round_fl_to_int(x - center);
++              if (depth_right[index_dest] >= depth && depth_left[index_src] >= depth) {
++                int link_index = links[index_src];
++                links[index_dest] = link_index;
++                depth_left[index_src] = depth;
++                depth_right[index_dest] = depth;
++              }
++            }
++          }
++          else {
++            /* Left side. */
++            if (x + center <= width - 1 && x - center >= 0) {
++              int index_dest = round_fl_to_int(x - center);
++              int index_src = round_fl_to_int(x + center);
++              if (depth_left[index_dest] >= depth && depth_right[index_src] >= depth) {
++                int link_index = links[index_src];
++                links[index_dest] = link_index;
++                depth_right[index_src] = depth;
++                depth_left[index_dest] = depth;
++              }
++            }
++          }
++        }
++      }
++    }
++
++    if (elastic) {
++      /* Assign color to each link. */
++      memset(reorder, 0, width_tile * sizeof(*reorder));
++      memset(reorder_priority, 0, width_tile * sizeof(*reorder_priority));
++      unsigned int counter = 0;
++      for (int i = width_tile - 1; i >= 0; i--) {
++        int index = links[i + x_center];
++        if (reorder_priority[index] == 0.0f) {
++          reorder[index] = fmodf(i * scale + width_tile * (1.0f - scale), width);  // TODO CHECK!
++          reorder_priority[index] = 1.0f;
++          counter++;
++        }
++      }
++      /* Patch holes. */
++      for (int i = 1; i < width - 1; i++) {
++        int index = links[i];
++        if (reorder_priority[index] == 0.0f) {
++          int left_index = links[i - 1];
++          int right_index = links[i + 1];
++          float p = 0;
++          if (reorder_priority[left_index] > 0.0f && reorder_priority[right_index] > 0.0f) {
++            p += reorder[left_index];
++            p += reorder[right_index];
++            p /= 2.0f;
++          }
++          else {
++            p = i * scale + width_tile * (1.0f - scale);  // TODO CHECK!
++          }
++          reorder[index] = fmodf(p, width);
++          reorder_priority[index] = 1.0f;
++          counter++;
++        }
++        if (counter == width_tile) {
++          break;
++        }
++      }
++    }
++    else {
++      /* Calculate border map. */
++      int influence_size = 7;
++      for (int x = 0; x < width; x++) {
++        border[x] = 0;
++        float depth = clamp_f(zbuf[x + line_offset], near_plane_distance, far_plane_distance);
++        for (int i = max_ii(-influence_size, -x); i <= min_ii(influence_size, (width - 1) - x);
++             i++) {
++          if (i != 0) {
++            float depth2 = clamp_f(
++                zbuf[x + i + line_offset], near_plane_distance, far_plane_distance);
++            if (flip_z) {
++              depth2 = near_plane_distance + far_plane_distance - depth2;
++            }
++            border[x] = max_ff(border[x], (depth2 - depth) / fabsf((float)i));
++          }
++        }
++      }
++      /* Assign color to each link. (Texturemapping) */
++      for (int j = 0; j < width; j++) {
++        int i = (j + x_center) % width;
++        if (i < x_center) {
++          i = x_center - i;
++        }
++        int index = links[i];
++        float depth;
++        int offset;
++        if (i > width_tile_min / 2 && i < width - width_tile_min / 2) {
++          depth = max_ff(depth_left[i], depth_right[i]);
++          offset = (int)floorf(
++              fabsf(zbuf_depth_map(depth, view_plane_distance, eye_distance_px, flip_z)) / 2.0f);
++          if (i + offset > 0 && i + offset < width) {
++            float priority = 1.0f / depth + border[i + offset];
++            if (reorder_priority[index] < priority) {
++              reorder[index] = i + offset;
++              reorder_priority[index] = priority;
++            }
++          }
++        }
++      }
++    }
++
++    /* Write output. */
++    for (int x = 0; x < width; x++) {
++      int pixel1 = (int)floorf(reorder[links[x]]);
++      int pixel2 = (int)ceilf(reorder[links[x]]);
++      if (pixel1 >= 0 && pixel2 < width) {
++        unsigned int index = (line_offset + x) * COM_NUM_CHANNELS_COLOR;
++        int index_shifted1 = (line_offset + pixel1) * COM_NUM_CHANNELS_COLOR;
++        int index_shifted2 = (line_offset + pixel2) * COM_NUM_CHANNELS_COLOR;
++        float fac = remainder(reorder[links[x]], 1.0f);
++        outbuf[index] = imgbuf[index_shifted1] +
++                        (imgbuf[index_shifted2] - imgbuf[index_shifted1]) * fac;
++        outbuf[index + 1] = imgbuf[index_shifted1 + 1] +
++                            (imgbuf[index_shifted2 + 1] - imgbuf[index_shifted1 + 1]) * fac;
++        outbuf[index + 2] = imgbuf[index_shifted1 + 2] +
++                            (imgbuf[index_shifted2 + 2] - imgbuf[index_shifted1 + 2]) * fac;
++        outbuf[index + 3] = imgbuf[index_shifted1 + 3] +
++                            (imgbuf[index_shifted2 + 3] - imgbuf[index_shifted1 + 3]) * fac;
++      }
++    }
++  }
++  MEM_freeN(links);
++  MEM_freeN(depth_left);
++  MEM_freeN(depth_right);
++  MEM_freeN(reorder);
++  MEM_freeN(reorder_priority);
++  MEM_freeN(border);
++}
+\ No newline at end of file
+diff --git a/source/blender/compositor/operations/COM_SIRDSOperation.h b/source/blender/compositor/operations/COM_SIRDSOperation.h
+new file mode 100644
+index 00000000000..754ff6eebf5
+--- /dev/null
++++ b/source/blender/compositor/operations/COM_SIRDSOperation.h
+@@ -0,0 +1,61 @@
++/* This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ * Copyright 2014, Blender Foundation.
++ */
++
++#ifndef __COM_SIRDSOPERATION_H__
++#define __COM_SIRDSOPERATION_H__
++
++#include "COM_NodeOperation.h"
++
++class SIRDSOperation : public NodeOperation {
++ public:
++  SIRDSOperation();
++
++  void executePixel(float output[4], int x, int y, void *data);
++
++  void initExecution();
++
++  void *initializeTileData(rcti *rect);
++
++  void deinitExecution();
++
++  bool determineDependingAreaOfInterest(rcti *input,
++                                        ReadBufferOperation *readOperation,
++                                        rcti *output);
++
++  void setData(const NodeSIRDS &data)
++  {
++    m_data = data;
++  }
++
++ protected:
++  void generateSIRDS(float *data, MemoryBuffer *inputImage, MemoryBuffer *inputZ);
++
++ private:
++  NodeSIRDS m_data;
++
++  SocketReader *m_patternReader;
++  SocketReader *m_depthReader;
++
++  SocketReader *m_clipstartReader;
++  SocketReader *m_clipendReader;
++  SocketReader *m_fovReader;
++  SocketReader *m_centerReader;
++
++  float *m_cachedInstance;
++};
++
++#endif
+diff --git a/source/blender/editors/space_node/drawnode.c b/source/blender/editors/space_node/drawnode.c
+index 01ac3a80871..76cf0a78e0c 100644
+--- a/source/blender/editors/space_node/drawnode.c
++++ b/source/blender/editors/space_node/drawnode.c
+@@ -2714,6 +2714,17 @@ static void node_composit_buts_denoise(uiLayout *layout, bContext *UNUSED(C), Po
+   uiItemR(layout, ptr, "use_hdr", DEFAULT_FLAGS, NULL, ICON_NONE);
+ }
+ 
++static void node_composit_buts_sirds(uiLayout *layout, bContext *UNUSED(C), PointerRNA *ptr)
++{
++  uiLayout *col = uiLayoutColumn(layout, true);
++  uiItemR(col, ptr, "view_width", 0, NULL, ICON_NONE);
++  uiItemR(col, ptr, "view_distance", 0, NULL, ICON_NONE);
++
++  col = uiLayoutColumn(layout, true);
++  uiItemR(col, ptr, "elastic", 0, NULL, ICON_NONE);
++  uiItemR(col, ptr, "invert_z", 0, NULL, ICON_NONE);
++}
++
+ /* only once called */
+ static void node_composit_set_butfunc(bNodeType *ntype)
+ {
+@@ -2951,6 +2962,9 @@ static void node_composit_set_butfunc(bNodeType *ntype)
+     case CMP_NODE_DENOISE:
+       ntype->draw_buttons = node_composit_buts_denoise;
+       break;
++    case CMP_NODE_SIRDS:
++      ntype->draw_buttons = node_composit_buts_sirds;
++      break;
+   }
+ }
+ 
+diff --git a/source/blender/makesdna/DNA_node_types.h b/source/blender/makesdna/DNA_node_types.h
+index 4ff0e531168..07c1b4acaf6 100644
+--- a/source/blender/makesdna/DNA_node_types.h
++++ b/source/blender/makesdna/DNA_node_types.h
+@@ -1047,6 +1047,16 @@ typedef struct NodeDenoise {
+   char _pad[7];
+ } NodeDenoise;
+ 
++typedef struct NodeSIRDS {
++  float clip_near;
++  float clip_far;
++  float camera_fov;
++  float view_width;
++  float view_distance;
++
++  int flag;
++} NodeSIRDS;
++
+ /* script node mode */
+ #define NODE_SCRIPT_INTERNAL 0
+ #define NODE_SCRIPT_EXTERNAL 1
+@@ -1383,6 +1393,12 @@ enum {
+   CMP_NODEFLAG_STABILIZE_INVERSE = 1,
+ };
+ 
++/* SIRDS node */
++enum {
++  CMP_NODEFLAG_SIRDS_INVERT_Z = 1,
++  CMP_NODEFLAG_SIRDS_ELASTIC = 2,
++};
++
+ #define CMP_NODE_PLANETRACKDEFORM_MBLUR_SAMPLES_MAX 64
+ 
+ /* Point Density shader node */
+diff --git a/source/blender/makesrna/intern/rna_nodetree.c b/source/blender/makesrna/intern/rna_nodetree.c
+index 32999c91fad..4a5b4269f8a 100644
+--- a/source/blender/makesrna/intern/rna_nodetree.c
++++ b/source/blender/makesrna/intern/rna_nodetree.c
+@@ -8038,6 +8038,35 @@ static void def_cmp_denoise(StructRNA *srna)
+   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+ }
+ 
++static void def_cmp_sirds(StructRNA *srna)
++{
++  PropertyRNA *prop;
++
++  RNA_def_struct_sdna_from(srna, "NodeSIRDS", "storage");
++
++  prop = RNA_def_property(srna, "elastic", PROP_BOOLEAN, PROP_NONE);
++  RNA_def_property_boolean_sdna(prop, NULL, "flag", CMP_NODEFLAG_SIRDS_ELASTIC);
++  RNA_def_property_ui_text(prop, "Elastic", "Stretch tile width to use the same width on every row");
++  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
++
++  prop = RNA_def_property(srna, "invert_z", PROP_BOOLEAN, PROP_NONE);
++  RNA_def_property_boolean_sdna(prop, NULL, "flag", CMP_NODEFLAG_SIRDS_INVERT_Z);
++  RNA_def_property_ui_text(prop, "Invert Z", "Invert depth for crossing eyes instead of looking through the image (parallel viewing)");
++  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
++
++  prop = RNA_def_property(srna, "view_width", PROP_FLOAT, PROP_DISTANCE);
++  RNA_def_property_float_sdna(prop, NULL, "view_width");
++  RNA_def_property_range(prop, 0.0, FLT_MAX);
++  RNA_def_property_ui_text(prop, "View Width", "The size of the displayed image in real world units");
++  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
++
++  prop = RNA_def_property(srna, "view_distance", PROP_FLOAT, PROP_DISTANCE);
++  RNA_def_property_float_sdna(prop, NULL, "view_distance");
++  RNA_def_property_range(prop, 0.0, FLT_MAX);
++  RNA_def_property_ui_text(prop, "View Distance", "The usual inspection distance to the image in real world units");
++  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
++}
++
+ /* -- Texture Nodes --------------------------------------------------------- */
+ 
+ static void def_tex_output(StructRNA *srna)
+diff --git a/source/blender/nodes/CMakeLists.txt b/source/blender/nodes/CMakeLists.txt
+index 80bf0f7c5e2..8673bc8c650 100644
+--- a/source/blender/nodes/CMakeLists.txt
++++ b/source/blender/nodes/CMakeLists.txt
+@@ -110,6 +110,7 @@ set(SRC
+   composite/nodes/node_composite_sepcombYCCA.c
+   composite/nodes/node_composite_sepcombYUVA.c
+   composite/nodes/node_composite_setalpha.c
++  composite/nodes/node_composite_sirds.c
+   composite/nodes/node_composite_splitViewer.c
+   composite/nodes/node_composite_stabilize2d.c
+   composite/nodes/node_composite_sunbeams.c
+diff --git a/source/blender/nodes/NOD_composite.h b/source/blender/nodes/NOD_composite.h
+index 534e9012693..458ffefe09b 100644
+--- a/source/blender/nodes/NOD_composite.h
++++ b/source/blender/nodes/NOD_composite.h
+@@ -75,6 +75,7 @@ void register_node_type_cmp_inpaint(void);
+ void register_node_type_cmp_despeckle(void);
+ void register_node_type_cmp_defocus(void);
+ void register_node_type_cmp_denoise(void);
++void register_node_type_cmp_sirds(void);
+ 
+ void register_node_type_cmp_valtorgb(void);
+ void register_node_type_cmp_rgbtobw(void);
+diff --git a/source/blender/nodes/NOD_static_types.h b/source/blender/nodes/NOD_static_types.h
+index 91aa11566d3..dcc94b796ee 100644
+--- a/source/blender/nodes/NOD_static_types.h
++++ b/source/blender/nodes/NOD_static_types.h
+@@ -222,6 +222,7 @@ DefNode(CompositorNode, CMP_NODE_CORNERPIN,      0,                      "CORNER
+ DefNode(CompositorNode, CMP_NODE_SUNBEAMS,       def_cmp_sunbeams,       "SUNBEAMS",       SunBeams,         "Sun Beams",         ""              )
+ DefNode(CompositorNode, CMP_NODE_CRYPTOMATTE,    def_cmp_cryptomatte,    "CRYPTOMATTE",    Cryptomatte,      "Cryptomatte",       ""              )
+ DefNode(CompositorNode, CMP_NODE_DENOISE,        def_cmp_denoise,        "DENOISE",        Denoise,          "Denoise",           ""              )
++DefNode(CompositorNode, CMP_NODE_SIRDS,          def_cmp_sirds,          "SIRDS",          SIRDS,            "SIRDS",             ""              )
+ 
+ DefNode(TextureNode,    TEX_NODE_OUTPUT,         def_tex_output,         "OUTPUT",         Output,           "Output",            ""              )
+ DefNode(TextureNode,    TEX_NODE_CHECKER,        0,                      "CHECKER",        Checker,          "Checker",           ""              )
+diff --git a/source/blender/nodes/composite/nodes/node_composite_sirds.c b/source/blender/nodes/composite/nodes/node_composite_sirds.c
+new file mode 100644
+index 00000000000..9da8d0953f9
+--- /dev/null
++++ b/source/blender/nodes/composite/nodes/node_composite_sirds.c
+@@ -0,0 +1,60 @@
++/*
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ * The Original Code is Copyright (C) 2019 Blender Foundation.
++ * All rights reserved.
++ *
++ * The Original Code is: all of this file.
++ */
++
++/** \file
++ * \ingroup cmpnodes
++ */
++
++#include "node_composite_util.h"
++
++static bNodeSocketTemplate cmp_node_sirds_in[] = {
++    {SOCK_RGBA, N_("Pattern"), 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
++    {SOCK_FLOAT, N_("Depth"), 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, PROP_NONE, SOCK_HIDE_VALUE},
++    {SOCK_FLOAT, N_("Clip Start"), 5.0f, 0.0f, 0.0f, 0.0f, 0.0001f, 10000, PROP_DISTANCE},
++    {SOCK_FLOAT, N_("Clip End"), 10.0f, 0.0f, 0.0f, 0.0f, 0.0001f, 10000, PROP_DISTANCE},
++    {SOCK_FLOAT, N_("Camera FOV"), 0.691112f, 0.0f, 0.0f, 0.0f, 0.0001f, 3.14f, PROP_ANGLE},
++    {SOCK_FLOAT, N_("Center"), 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, PROP_FACTOR},
++    {-1, ""}};
++static bNodeSocketTemplate cmp_node_sirds_out[] = {
++    {SOCK_RGBA, N_("Image")}, {-1, ""}};
++
++static void node_composit_init_sirds(bNodeTree *UNUSED(ntree), bNode *node)
++{
++  NodeSIRDS *nsirds = MEM_callocN(sizeof(NodeSIRDS), "node sirds data");
++  nsirds->clip_far = 5.0f;
++  nsirds->clip_near = 0.5f;
++  nsirds->camera_fov = 0.691112f; /* Default startup camera FOV */
++  nsirds->view_width = 0.4f;
++  nsirds->view_distance = 0.5f;
++  node->storage = nsirds;
++}
++
++void register_node_type_cmp_sirds(void)
++{
++  static bNodeType ntype;
++
++  cmp_node_type_base(&ntype, CMP_NODE_SIRDS, "SIRDS", NODE_CLASS_OP_FILTER, 0);
++  node_type_socket_templates(&ntype, cmp_node_sirds_in, cmp_node_sirds_out);
++  node_type_init(&ntype, node_composit_init_sirds);
++  node_type_storage(&ntype, "NodeSIRDS", node_free_standard_storage, node_copy_standard_storage);
++
++  nodeRegisterType(&ntype);
++}
