@@ -1,5 +1,5 @@
 diff --git a/release/scripts/startup/nodeitems_builtins.py b/release/scripts/startup/nodeitems_builtins.py
-index 2dc6c6cd409..c65fd725fcf 100644
+index 0cf0a99c326..c2115157c5c 100644
 --- a/release/scripts/startup/nodeitems_builtins.py
 +++ b/release/scripts/startup/nodeitems_builtins.py
 @@ -371,6 +371,7 @@ compositor_node_categories = [
@@ -11,10 +11,10 @@ index 2dc6c6cd409..c65fd725fcf 100644
      CompositorNodeCategory("CMP_OP_VECTOR", "Vector", items=[
          NodeItem("CompositorNodeNormal"),
 diff --git a/source/blender/blenkernel/BKE_node.h b/source/blender/blenkernel/BKE_node.h
-index 536d04f8bd3..282f5135e30 100644
+index 3421aa9e900..8afe1733bf0 100644
 --- a/source/blender/blenkernel/BKE_node.h
 +++ b/source/blender/blenkernel/BKE_node.h
-@@ -1152,6 +1152,7 @@ void ntreeGPUMaterialNodes(struct bNodeTree *localtree,
+@@ -1192,6 +1192,7 @@ void ntreeGPUMaterialNodes(struct bNodeTree *localtree,
  #define CMP_NODE_SWITCH_VIEW 322
  #define CMP_NODE_CRYPTOMATTE 323
  #define CMP_NODE_DENOISE 324
@@ -23,10 +23,10 @@ index 536d04f8bd3..282f5135e30 100644
  /* channel toggles */
  #define CMP_CHAN_RGB 1
 diff --git a/source/blender/blenkernel/intern/node.c b/source/blender/blenkernel/intern/node.c
-index 48c6727add5..13c148c4496 100644
+index 1c7060541db..fa0b31312c0 100644
 --- a/source/blender/blenkernel/intern/node.c
 +++ b/source/blender/blenkernel/intern/node.c
-@@ -4088,6 +4088,7 @@ static void registerCompositNodes(void)
+@@ -4498,6 +4498,7 @@ static void registerCompositNodes(void)
    register_node_type_cmp_defocus();
    register_node_type_cmp_sunbeams();
    register_node_type_cmp_denoise();
@@ -57,7 +57,7 @@ index d524f4a0e1e..8aff82157bd 100644
    operations/COM_VariableSizeBokehBlurOperation.h
  
 diff --git a/source/blender/compositor/intern/COM_Converter.cpp b/source/blender/compositor/intern/COM_Converter.cpp
-index edfeb3a3a04..655d25db926 100644
+index 60676ee42b7..e899d781f83 100644
 --- a/source/blender/compositor/intern/COM_Converter.cpp
 +++ b/source/blender/compositor/intern/COM_Converter.cpp
 @@ -95,6 +95,7 @@
@@ -642,10 +642,10 @@ index 00000000000..754ff6eebf5
 +
 +#endif
 diff --git a/source/blender/editors/space_node/drawnode.c b/source/blender/editors/space_node/drawnode.c
-index 01ac3a80871..76cf0a78e0c 100644
+index 9db89ec1ba2..4975f2b78e2 100644
 --- a/source/blender/editors/space_node/drawnode.c
 +++ b/source/blender/editors/space_node/drawnode.c
-@@ -2714,6 +2714,17 @@ static void node_composit_buts_denoise(uiLayout *layout, bContext *UNUSED(C), Po
+@@ -2721,6 +2721,17 @@ static void node_composit_buts_denoise(uiLayout *layout, bContext *UNUSED(C), Po
    uiItemR(layout, ptr, "use_hdr", DEFAULT_FLAGS, NULL, ICON_NONE);
  }
  
@@ -663,7 +663,7 @@ index 01ac3a80871..76cf0a78e0c 100644
  /* only once called */
  static void node_composit_set_butfunc(bNodeType *ntype)
  {
-@@ -2951,6 +2962,9 @@ static void node_composit_set_butfunc(bNodeType *ntype)
+@@ -2958,6 +2969,9 @@ static void node_composit_set_butfunc(bNodeType *ntype)
      case CMP_NODE_DENOISE:
        ntype->draw_buttons = node_composit_buts_denoise;
        break;
@@ -674,10 +674,10 @@ index 01ac3a80871..76cf0a78e0c 100644
  }
  
 diff --git a/source/blender/makesdna/DNA_node_types.h b/source/blender/makesdna/DNA_node_types.h
-index 4ff0e531168..07c1b4acaf6 100644
+index 1d76ebdff2c..52522d08ce9 100644
 --- a/source/blender/makesdna/DNA_node_types.h
 +++ b/source/blender/makesdna/DNA_node_types.h
-@@ -1047,6 +1047,16 @@ typedef struct NodeDenoise {
+@@ -1056,6 +1056,16 @@ typedef struct NodeDenoise {
    char _pad[7];
  } NodeDenoise;
  
@@ -694,7 +694,7 @@ index 4ff0e531168..07c1b4acaf6 100644
  /* script node mode */
  #define NODE_SCRIPT_INTERNAL 0
  #define NODE_SCRIPT_EXTERNAL 1
-@@ -1383,6 +1393,12 @@ enum {
+@@ -1393,6 +1403,12 @@ enum {
    CMP_NODEFLAG_STABILIZE_INVERSE = 1,
  };
  
@@ -708,10 +708,10 @@ index 4ff0e531168..07c1b4acaf6 100644
  
  /* Point Density shader node */
 diff --git a/source/blender/makesrna/intern/rna_nodetree.c b/source/blender/makesrna/intern/rna_nodetree.c
-index 32999c91fad..4a5b4269f8a 100644
+index 8c99a4cc1a1..2579105f577 100644
 --- a/source/blender/makesrna/intern/rna_nodetree.c
 +++ b/source/blender/makesrna/intern/rna_nodetree.c
-@@ -8038,6 +8038,35 @@ static void def_cmp_denoise(StructRNA *srna)
+@@ -8102,6 +8102,35 @@ static void def_cmp_denoise(StructRNA *srna)
    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
  }
  
@@ -748,10 +748,10 @@ index 32999c91fad..4a5b4269f8a 100644
  
  static void def_tex_output(StructRNA *srna)
 diff --git a/source/blender/nodes/CMakeLists.txt b/source/blender/nodes/CMakeLists.txt
-index 80bf0f7c5e2..8673bc8c650 100644
+index 4172dc06a9f..09d0e3e61fb 100644
 --- a/source/blender/nodes/CMakeLists.txt
 +++ b/source/blender/nodes/CMakeLists.txt
-@@ -110,6 +110,7 @@ set(SRC
+@@ -109,6 +109,7 @@ set(SRC
    composite/nodes/node_composite_sepcombYCCA.c
    composite/nodes/node_composite_sepcombYUVA.c
    composite/nodes/node_composite_setalpha.c
@@ -760,10 +760,10 @@ index 80bf0f7c5e2..8673bc8c650 100644
    composite/nodes/node_composite_stabilize2d.c
    composite/nodes/node_composite_sunbeams.c
 diff --git a/source/blender/nodes/NOD_composite.h b/source/blender/nodes/NOD_composite.h
-index 534e9012693..458ffefe09b 100644
+index 99bcb849ebd..289b3383042 100644
 --- a/source/blender/nodes/NOD_composite.h
 +++ b/source/blender/nodes/NOD_composite.h
-@@ -75,6 +75,7 @@ void register_node_type_cmp_inpaint(void);
+@@ -78,6 +78,7 @@ void register_node_type_cmp_inpaint(void);
  void register_node_type_cmp_despeckle(void);
  void register_node_type_cmp_defocus(void);
  void register_node_type_cmp_denoise(void);
@@ -772,7 +772,7 @@ index 534e9012693..458ffefe09b 100644
  void register_node_type_cmp_valtorgb(void);
  void register_node_type_cmp_rgbtobw(void);
 diff --git a/source/blender/nodes/NOD_static_types.h b/source/blender/nodes/NOD_static_types.h
-index 91aa11566d3..dcc94b796ee 100644
+index 7922a73902c..f7c88d2b924 100644
 --- a/source/blender/nodes/NOD_static_types.h
 +++ b/source/blender/nodes/NOD_static_types.h
 @@ -222,6 +222,7 @@ DefNode(CompositorNode, CMP_NODE_CORNERPIN,      0,                      "CORNER
