@@ -1,162 +1,120 @@
-diff --git a/release/scripts/startup/nodeitems_builtins.py b/release/scripts/startup/nodeitems_builtins.py
-index 0cf0a99c326..c2115157c5c 100644
---- a/release/scripts/startup/nodeitems_builtins.py
-+++ b/release/scripts/startup/nodeitems_builtins.py
-@@ -371,6 +371,7 @@ compositor_node_categories = [
-         NodeItem("CompositorNodePixelate"),
+diff --git a/scripts/startup/nodeitems_builtins.py b/scripts/startup/nodeitems_builtins.py
+index 3deec135888..33bdc7b9c80 100644
+--- a/scripts/startup/nodeitems_builtins.py
++++ b/scripts/startup/nodeitems_builtins.py
+@@ -336,6 +336,7 @@ compositor_node_categories = [
          NodeItem("CompositorNodeSunBeams"),
          NodeItem("CompositorNodeDenoise"),
+         NodeItem("CompositorNodeAntiAliasing"),
 +        NodeItem("CompositorNodeSIRDS"),
      ]),
      CompositorNodeCategory("CMP_OP_VECTOR", "Vector", items=[
          NodeItem("CompositorNodeNormal"),
 diff --git a/source/blender/blenkernel/BKE_node.h b/source/blender/blenkernel/BKE_node.h
-index 3421aa9e900..8afe1733bf0 100644
+index d7d17600683..3420b2d9a1f 100644
 --- a/source/blender/blenkernel/BKE_node.h
 +++ b/source/blender/blenkernel/BKE_node.h
-@@ -1192,6 +1192,7 @@ void ntreeGPUMaterialNodes(struct bNodeTree *localtree,
- #define CMP_NODE_SWITCH_VIEW 322
- #define CMP_NODE_CRYPTOMATTE 323
- #define CMP_NODE_DENOISE 324
-+#define CMP_NODE_SIRDS 325
+@@ -1346,6 +1346,7 @@ void BKE_nodetree_remove_layer_n(struct bNodeTree *ntree, struct Scene *scene, i
+ #define CMP_NODE_COMBINE_XYZ 331
+ #define CMP_NODE_COMBINE_COLOR 332
+ #define CMP_NODE_SEPARATE_COLOR 333
++#define CMP_NODE_SIRDS 334
  
  /* channel toggles */
  #define CMP_CHAN_RGB 1
-diff --git a/source/blender/blenkernel/intern/node.c b/source/blender/blenkernel/intern/node.c
-index 1c7060541db..fa0b31312c0 100644
---- a/source/blender/blenkernel/intern/node.c
-+++ b/source/blender/blenkernel/intern/node.c
-@@ -4498,6 +4498,7 @@ static void registerCompositNodes(void)
-   register_node_type_cmp_defocus();
-   register_node_type_cmp_sunbeams();
-   register_node_type_cmp_denoise();
-+  register_node_type_cmp_sirds();
- 
-   register_node_type_cmp_valtorgb();
-   register_node_type_cmp_rgbtobw();
 diff --git a/source/blender/compositor/CMakeLists.txt b/source/blender/compositor/CMakeLists.txt
-index d524f4a0e1e..8aff82157bd 100644
+index f49a9694ab3..2ab639b3a4e 100644
 --- a/source/blender/compositor/CMakeLists.txt
 +++ b/source/blender/compositor/CMakeLists.txt
-@@ -292,6 +292,8 @@ set(SRC
-   nodes/COM_FilterNode.h
-   nodes/COM_InpaintNode.cpp
-   nodes/COM_InpaintNode.h
-+  nodes/COM_SIRDSNode.cpp
-+  nodes/COM_SIRDSNode.h
-   operations/COM_BlurBaseOperation.cpp
-   operations/COM_BlurBaseOperation.h
-   operations/COM_BokehBlurOperation.cpp
-@@ -316,6 +318,8 @@ set(SRC
-   operations/COM_MovieClipAttributeOperation.h
-   operations/COM_MovieDistortionOperation.cpp
-   operations/COM_MovieDistortionOperation.h
-+  operations/COM_SIRDSOperation.cpp
-+  operations/COM_SIRDSOperation.h
-   operations/COM_VariableSizeBokehBlurOperation.cpp
-   operations/COM_VariableSizeBokehBlurOperation.h
+@@ -323,6 +323,8 @@ if(WITH_COMPOSITOR_CPU)
+     nodes/COM_InpaintNode.h
+     nodes/COM_PosterizeNode.cc
+     nodes/COM_PosterizeNode.h
++    nodes/COM_SIRDSNode.cc
++    nodes/COM_SIRDSNode.h
  
-diff --git a/source/blender/compositor/intern/COM_Converter.cpp b/source/blender/compositor/intern/COM_Converter.cpp
-index 60676ee42b7..e899d781f83 100644
---- a/source/blender/compositor/intern/COM_Converter.cpp
-+++ b/source/blender/compositor/intern/COM_Converter.cpp
-@@ -95,6 +95,7 @@
- #include "COM_SeparateColorNode.h"
+     operations/COM_BlurBaseOperation.cc
+     operations/COM_BlurBaseOperation.h
+@@ -354,6 +356,8 @@ if(WITH_COMPOSITOR_CPU)
+     operations/COM_MovieDistortionOperation.h
+     operations/COM_PosterizeOperation.cc
+     operations/COM_PosterizeOperation.h
++    operations/COM_SIRDSOperation.cc
++    operations/COM_SIRDSOperation.h
+     operations/COM_SMAAOperation.cc
+     operations/COM_SMAAOperation.h
+     operations/COM_VariableSizeBokehBlurOperation.cc
+diff --git a/source/blender/compositor/intern/COM_Converter.cc b/source/blender/compositor/intern/COM_Converter.cc
+index 6d7341376e9..26ed419657e 100644
+--- a/source/blender/compositor/intern/COM_Converter.cc
++++ b/source/blender/compositor/intern/COM_Converter.cc
+@@ -87,6 +87,7 @@
+ #include "COM_SeparateXYZNode.h"
  #include "COM_SetAlphaNode.h"
  #include "COM_SetValueOperation.h"
 +#include "COM_SIRDSNode.h"
  #include "COM_SplitViewerNode.h"
  #include "COM_Stabilize2dNode.h"
  #include "COM_SunBeamsNode.h"
-@@ -404,6 +405,9 @@ Node *Converter::convert(bNode *b_node)
+@@ -417,6 +418,9 @@ Node *COM_convert_bnode(bNode *b_node)
      case CMP_NODE_DENOISE:
        node = new DenoiseNode(b_node);
        break;
 +    case CMP_NODE_SIRDS:
 +      node = new SIRDSNode(b_node);
 +      break;
-   }
-   return node;
- }
-diff --git a/source/blender/compositor/nodes/COM_SIRDSNode.cpp b/source/blender/compositor/nodes/COM_SIRDSNode.cpp
+     case CMP_NODE_EXPOSURE:
+       node = new ExposureNode(b_node);
+       break;
+diff --git a/source/blender/compositor/nodes/COM_SIRDSNode.cc b/source/blender/compositor/nodes/COM_SIRDSNode.cc
 new file mode 100644
-index 00000000000..ee12d11b30b
+index 00000000000..5f511b3d174
 --- /dev/null
-+++ b/source/blender/compositor/nodes/COM_SIRDSNode.cpp
-@@ -0,0 +1,46 @@
-+/* This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License
-+ * as published by the Free Software Foundation; either version 2
-+ * of the License, or (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software Foundation,
-+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-+ *
-+ * Copyright 2014, Blender Foundation.
-+ */
++++ b/source/blender/compositor/nodes/COM_SIRDSNode.cc
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright 2011 Blender Foundation. */
 +
 +#include "COM_SIRDSNode.h"
 +#include "COM_SIRDSOperation.h"
 +
-+SIRDSNode::SIRDSNode(bNode *editorNode) : Node(editorNode)
-+{
-+  /* pass */
-+}
++namespace blender::compositor {
 +
-+void SIRDSNode::convertToOperations(NodeConverter &converter,
-+                                    const CompositorContext & /*context*/) const
++void SIRDSNode::convert_to_operations(NodeConverter &converter,
++                                      const CompositorContext & /*context*/) const
 +{
-+  NodeSIRDS *data = (NodeSIRDS *)getbNode()->storage;
-+
-+  NodeInput *inputSocketImage = this->getInputSocket(0);
-+  NodeInput *inputSocketDepth = this->getInputSocket(1);
-+  NodeOutput *outputSocketImage = this->getOutputSocket(0);
++  const bNode *editor_node = this->get_bnode();
++  const NodeSIRDS *data = static_cast<const NodeSIRDS *>(editor_node->storage);
 +
 +  SIRDSOperation *operation = new SIRDSOperation();
-+  operation->setData(*data);
-+  converter.addOperation(operation);
++  operation->set_data(*data);
++  converter.add_operation(operation);
 +
-+  converter.mapInputSocket(inputSocketImage, operation->getInputSocket(0));
-+  converter.mapInputSocket(inputSocketDepth, operation->getInputSocket(1));
-+  converter.mapInputSocket(this->getInputSocket(2), operation->getInputSocket(2));
-+  converter.mapInputSocket(this->getInputSocket(3), operation->getInputSocket(3));
-+  converter.mapInputSocket(this->getInputSocket(4), operation->getInputSocket(4));
-+  converter.mapInputSocket(this->getInputSocket(5), operation->getInputSocket(5));
-+  converter.mapOutputSocket(outputSocketImage, operation->getOutputSocket(0));
++  converter.map_input_socket(this->get_input_socket(0), operation->get_input_socket(0));
++  converter.map_input_socket(this->get_input_socket(1), operation->get_input_socket(1));
++  converter.map_input_socket(this->get_input_socket(2), operation->get_input_socket(2));
++  converter.map_input_socket(this->get_input_socket(3), operation->get_input_socket(3));
++  converter.map_input_socket(this->get_input_socket(4), operation->get_input_socket(4));
++  converter.map_input_socket(this->get_input_socket(5), operation->get_input_socket(5));
++  converter.map_output_socket(this->get_output_socket(0), operation->get_output_socket(0));
 +}
++
++}  // namespace blender::compositor
+\ No newline at end of file
 diff --git a/source/blender/compositor/nodes/COM_SIRDSNode.h b/source/blender/compositor/nodes/COM_SIRDSNode.h
 new file mode 100644
-index 00000000000..36a387eb615
+index 00000000000..eec998fd09a
 --- /dev/null
 +++ b/source/blender/compositor/nodes/COM_SIRDSNode.h
-@@ -0,0 +1,33 @@
-+/* This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License
-+ * as published by the Free Software Foundation; either version 2
-+ * of the License, or (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software Foundation,
-+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-+ *
-+ * Copyright 2014, Blender Foundation.
-+ */
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright 2011 Blender Foundation. */
 +
-+#ifndef __COM_SIRDSNODE_H__
-+#define __COM_SIRDSNODE_H__
++#pragma once
 +
 +#include "COM_Node.h"
++
++namespace blender::compositor {
 +
 +/**
 + * \brief SIRDSNode
@@ -164,37 +122,30 @@ index 00000000000..36a387eb615
 + */
 +class SIRDSNode : public Node {
 + public:
-+  SIRDSNode(bNode *editorNode);
-+  void convertToOperations(NodeConverter &converter, const CompositorContext &context) const;
++  SIRDSNode(bNode *editor_node) : Node(editor_node)
++  {
++  }
++  void convert_to_operations(NodeConverter &converter,
++                             const CompositorContext &context) const override;
 +};
 +
-+#endif
-diff --git a/source/blender/compositor/operations/COM_SIRDSOperation.cpp b/source/blender/compositor/operations/COM_SIRDSOperation.cpp
++}  // namespace blender::compositor
+diff --git a/source/blender/compositor/operations/COM_SIRDSOperation.cc b/source/blender/compositor/operations/COM_SIRDSOperation.cc
 new file mode 100644
-index 00000000000..6f71af3aa3f
+index 00000000000..ee1160b81a2
 --- /dev/null
-+++ b/source/blender/compositor/operations/COM_SIRDSOperation.cpp
-@@ -0,0 +1,398 @@
-+/* This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License
-+ * as published by the Free Software Foundation; either version 2
-+ * of the License, or (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software Foundation,
-+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-+ *
-+ * Copyright 2014, Blender Foundation.
-+ */
++++ b/source/blender/compositor/operations/COM_SIRDSOperation.cc
+@@ -0,0 +1,394 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright 2011 Blender Foundation. */
 +
 +#include "MEM_guardedalloc.h"
 +
 +#include "COM_SIRDSOperation.h"
++
++namespace blender::compositor {
++
++#define COM_NUM_CHANNELS_COLOR 4
 +
 +/* Forward declarations. */
 +float zbuf_depth_map(float depth,
@@ -211,16 +162,16 @@ index 00000000000..6f71af3aa3f
 +
 +SIRDSOperation::SIRDSOperation() : NodeOperation()
 +{
-+  this->addInputSocket(COM_DT_COLOR);
-+  this->addInputSocket(COM_DT_VALUE);
-+  this->addInputSocket(COM_DT_VALUE);
-+  this->addInputSocket(COM_DT_VALUE);
-+  this->addInputSocket(COM_DT_VALUE);
-+  this->addInputSocket(COM_DT_VALUE);
-+  this->addOutputSocket(COM_DT_COLOR);
-+  this->setResolutionInputSocketIndex(1);
++  this->add_input_socket(DataType::Color);
++  this->add_input_socket(DataType::Value);
++  this->add_input_socket(DataType::Value);
++  this->add_input_socket(DataType::Value);
++  this->add_input_socket(DataType::Value);
++  this->add_input_socket(DataType::Value);
++  this->add_output_socket(DataType::Color);
++  this->set_canvas_input_index(1);
 +
-+  this->setComplex(true);
++  this->flags_.complex = true;
 +
 +  this->m_cachedInstance = NULL;
 +  this->m_patternReader = NULL;
@@ -231,28 +182,28 @@ index 00000000000..6f71af3aa3f
 +  this->m_centerReader = NULL;
 +}
 +
-+void SIRDSOperation::initExecution()
++void SIRDSOperation::init_execution()
 +{
-+  initMutex();
-+  this->m_patternReader = this->getInputSocketReader(0);
-+  this->m_depthReader = this->getInputSocketReader(1);
-+  this->m_clipstartReader = this->getInputSocketReader(2);
-+  this->m_clipendReader = this->getInputSocketReader(3);
-+  this->m_fovReader = this->getInputSocketReader(4);
-+  this->m_centerReader = this->getInputSocketReader(5);
++  init_mutex();
++  this->m_patternReader = this->get_input_socket_reader(0);
++  this->m_depthReader = this->get_input_socket_reader(1);
++  this->m_clipstartReader = this->get_input_socket_reader(2);
++  this->m_clipendReader = this->get_input_socket_reader(3);
++  this->m_fovReader = this->get_input_socket_reader(4);
++  this->m_centerReader = this->get_input_socket_reader(5);
 +  this->m_cachedInstance = NULL;
 +}
 +
-+void SIRDSOperation::executePixel(float output[4], int x, int y, void *data)
++void SIRDSOperation::execute_pixel(float output[4], int x, int y, void *data)
 +{
 +  float *buffer = (float *)data;
-+  int index = (y * this->getWidth() + x) * COM_NUM_CHANNELS_COLOR;
++  int index = (y * this->get_width() + x) * COM_NUM_CHANNELS_COLOR;
 +  copy_v4_v4(output, &buffer[index]);
 +}
 +
-+void SIRDSOperation::deinitExecution()
++void SIRDSOperation::deinit_execution()
 +{
-+  deinitMutex();
++  deinit_mutex();
 +  this->m_patternReader = NULL;
 +  this->m_depthReader = NULL;
 +  this->m_clipstartReader = NULL;
@@ -265,60 +216,70 @@ index 00000000000..6f71af3aa3f
 +  }
 +}
 +
-+void *SIRDSOperation::initializeTileData(rcti *rect)
++void *SIRDSOperation::initialize_tile_data(rcti *rect)
 +{
 +  if (this->m_cachedInstance) {
 +    return this->m_cachedInstance;
 +  }
 +
-+  lockMutex();
++  lock_mutex();
 +  if (this->m_cachedInstance == NULL) {
 +    MemoryBuffer *tile = NULL;
-+    tile = (MemoryBuffer *)this->m_patternReader->initializeTileData(rect);
-+    MemoryBuffer *z = (MemoryBuffer *)this->m_depthReader->initializeTileData(rect);
-+    float *data = (float *)MEM_dupallocN(tile->getBuffer());
++    tile = (MemoryBuffer *)this->m_patternReader->initialize_tile_data(rect);
++    MemoryBuffer *z = (MemoryBuffer *)this->m_depthReader->initialize_tile_data(rect);
++    float *data = (float *)MEM_dupallocN(tile->get_buffer());
 +
 +    float out[4];
-+    this->m_clipstartReader->readSampled(out, 0, 0, COM_PS_NEAREST);
++    this->m_clipstartReader->read_sampled(out, 0, 0, PixelSampler::Nearest);
 +    this->m_data.clip_near = out[0];
-+    this->m_clipendReader->readSampled(out, 0, 0, COM_PS_NEAREST);
++    this->m_clipendReader->read_sampled(out, 0, 0, PixelSampler::Nearest);
 +    this->m_data.clip_far = out[0];
-+    this->m_fovReader->readSampled(out, 0, 0, COM_PS_NEAREST);
++    this->m_fovReader->read_sampled(out, 0, 0, PixelSampler::Nearest);
 +    this->m_data.camera_fov = out[0];
 +
-+    this->generateSIRDS(data, tile, z);
++    this->generate_sirds(data, tile, z);
 +    this->m_cachedInstance = data;
 +  }
-+  unlockMutex();
++  unlock_mutex();
 +  return this->m_cachedInstance;
 +}
 +
-+bool SIRDSOperation::determineDependingAreaOfInterest(rcti * /*input*/,
-+                                                      ReadBufferOperation *readOperation,
-+                                                      rcti *output)
++bool SIRDSOperation::determine_depending_area_of_interest(rcti * /*input*/,
++                                                          ReadBufferOperation *readOperation,
++                                                          rcti *output)
 +{
 +  if (this->m_cachedInstance == NULL) {
 +    rcti newInput;
-+    newInput.xmax = this->getWidth();
++    newInput.xmax = this->get_width();
 +    newInput.xmin = 0;
-+    newInput.ymax = this->getHeight();
++    newInput.ymax = this->get_height();
 +    newInput.ymin = 0;
-+    return NodeOperation::determineDependingAreaOfInterest(&newInput, readOperation, output);
++    return NodeOperation::determine_depending_area_of_interest(&newInput, readOperation, output);
 +  }
 +  else {
 +    return false;
 +  }
 +}
 +
-+void SIRDSOperation::generateSIRDS(float *data, MemoryBuffer *inputImage, MemoryBuffer *inputZ)
++void SIRDSOperation::get_area_of_interest(const int /*input_idx*/,
++                                          const rcti &output_area,
++                                          rcti &r_input_area)
++{
++  r_input_area.xmax = this->get_width();
++  r_input_area.xmin = 0;
++  r_input_area.ymax = output_area.ymax;
++  r_input_area.ymin = output_area.ymin;
++}
++
++void SIRDSOperation::generate_sirds(float *data, MemoryBuffer *inputImage, MemoryBuffer *inputZ)
 +{
 +  zbuf_accumulate_sirds(&m_data,
-+                        this->getWidth(),
-+                        this->getHeight(),
++                        this->get_width(),
++                        this->get_height(),
 +                        this->m_centerReader,
 +                        data,
-+                        inputImage->getBuffer(),
-+                        inputZ->getBuffer());
++                        inputImage->get_buffer(),
++                        inputZ->get_buffer());
 +  return;
 +}
 +
@@ -385,7 +346,7 @@ index 00000000000..6f71af3aa3f
 +  /* Apply filter line after line. */
 +  for (int y = 0; y < height; y++) {
 +    float out[4];
-+    centerReader->readSampled(out, 0, y, COM_PS_NEAREST);
++    centerReader->read_sampled(out, 0, y, PixelSampler::Nearest);
 +    unsigned int x_center = (width - width_tile) * out[0];
 +    int line_offset = y * width;
 +    float scale = 1.0f;
@@ -430,9 +391,7 @@ index 00000000000..6f71af3aa3f
 +        /* Make pairs in subpixel precision. */
 +        for (float k = 0.0f; k < 1.0f; k += 0.2f) {
 +          float x = x_int + k;
-+          float depth = fabsf(depth1 - depth2) < 0.1f ?
-+                            depth1 + (depth2 - depth1) * k :
-+                            depth1;
++          float depth = fabsf(depth1 - depth2) < 0.1f ? depth1 + (depth2 - depth1) * k : depth1;
 +          depth = clamp_f(depth, near_plane_distance, far_plane_distance);
 +          float link_width = fabsf(
 +              zbuf_depth_map(depth, view_plane_distance, eye_distance_px, flip_z));
@@ -555,14 +514,10 @@ index 00000000000..6f71af3aa3f
 +        int index_shifted1 = (line_offset + pixel1) * COM_NUM_CHANNELS_COLOR;
 +        int index_shifted2 = (line_offset + pixel2) * COM_NUM_CHANNELS_COLOR;
 +        float fac = remainder(reorder[links[x]], 1.0f);
-+        outbuf[index] = imgbuf[index_shifted1] +
-+                        (imgbuf[index_shifted2] - imgbuf[index_shifted1]) * fac;
-+        outbuf[index + 1] = imgbuf[index_shifted1 + 1] +
-+                            (imgbuf[index_shifted2 + 1] - imgbuf[index_shifted1 + 1]) * fac;
-+        outbuf[index + 2] = imgbuf[index_shifted1 + 2] +
-+                            (imgbuf[index_shifted2 + 2] - imgbuf[index_shifted1 + 2]) * fac;
-+        outbuf[index + 3] = imgbuf[index_shifted1 + 3] +
-+                            (imgbuf[index_shifted2 + 3] - imgbuf[index_shifted1 + 3]) * fac;
++        for (int i = 0; i < COM_NUM_CHANNELS_COLOR; i++) {
++          outbuf[index + i] = imgbuf[index_shifted1 + i] +
++                              (imgbuf[index_shifted2 + i] - imgbuf[index_shifted1 + i]) * fac;
++        }
 +      }
 +    }
 +  }
@@ -573,58 +528,49 @@ index 00000000000..6f71af3aa3f
 +  MEM_freeN(reorder_priority);
 +  MEM_freeN(border);
 +}
++
++}  // namespace blender::compositor
 \ No newline at end of file
 diff --git a/source/blender/compositor/operations/COM_SIRDSOperation.h b/source/blender/compositor/operations/COM_SIRDSOperation.h
 new file mode 100644
-index 00000000000..754ff6eebf5
+index 00000000000..b5b261ecc3b
 --- /dev/null
 +++ b/source/blender/compositor/operations/COM_SIRDSOperation.h
-@@ -0,0 +1,61 @@
-+/* This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License
-+ * as published by the Free Software Foundation; either version 2
-+ * of the License, or (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software Foundation,
-+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-+ *
-+ * Copyright 2014, Blender Foundation.
-+ */
+@@ -0,0 +1,50 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright 2017 Blender Foundation. */
 +
-+#ifndef __COM_SIRDSOPERATION_H__
-+#define __COM_SIRDSOPERATION_H__
++#pragma once
 +
-+#include "COM_NodeOperation.h"
++#include "COM_MultiThreadedOperation.h"
++
++namespace blender::compositor {
 +
 +class SIRDSOperation : public NodeOperation {
 + public:
 +  SIRDSOperation();
 +
-+  void executePixel(float output[4], int x, int y, void *data);
++  void execute_pixel(float output[4], int x, int y, void *data) override;
 +
-+  void initExecution();
++  void init_execution() override;
 +
-+  void *initializeTileData(rcti *rect);
++  void *initialize_tile_data(rcti *rect) override;
 +
-+  void deinitExecution();
++  void deinit_execution() override;
 +
-+  bool determineDependingAreaOfInterest(rcti *input,
-+                                        ReadBufferOperation *readOperation,
-+                                        rcti *output);
++  bool determine_depending_area_of_interest(rcti *input,
++                                            ReadBufferOperation *read_operation,
++                                            rcti *output) override;
 +
-+  void setData(const NodeSIRDS &data)
++  void get_area_of_interest(int input_idx, const rcti &output_area, rcti &r_input_area) override;
++
++  void set_data(const NodeSIRDS &data)
 +  {
 +    m_data = data;
 +  }
 +
 + protected:
-+  void generateSIRDS(float *data, MemoryBuffer *inputImage, MemoryBuffer *inputZ);
++  void generate_sirds(float *data, MemoryBuffer *inputImage, MemoryBuffer *inputZ);
 +
 + private:
 +  NodeSIRDS m_data;
@@ -640,46 +586,15 @@ index 00000000000..754ff6eebf5
 +  float *m_cachedInstance;
 +};
 +
-+#endif
-diff --git a/source/blender/editors/space_node/drawnode.c b/source/blender/editors/space_node/drawnode.c
-index 9db89ec1ba2..4975f2b78e2 100644
---- a/source/blender/editors/space_node/drawnode.c
-+++ b/source/blender/editors/space_node/drawnode.c
-@@ -2721,6 +2721,17 @@ static void node_composit_buts_denoise(uiLayout *layout, bContext *UNUSED(C), Po
-   uiItemR(layout, ptr, "use_hdr", DEFAULT_FLAGS, NULL, ICON_NONE);
- }
- 
-+static void node_composit_buts_sirds(uiLayout *layout, bContext *UNUSED(C), PointerRNA *ptr)
-+{
-+  uiLayout *col = uiLayoutColumn(layout, true);
-+  uiItemR(col, ptr, "view_width", 0, NULL, ICON_NONE);
-+  uiItemR(col, ptr, "view_distance", 0, NULL, ICON_NONE);
-+
-+  col = uiLayoutColumn(layout, true);
-+  uiItemR(col, ptr, "elastic", 0, NULL, ICON_NONE);
-+  uiItemR(col, ptr, "invert_z", 0, NULL, ICON_NONE);
-+}
-+
- /* only once called */
- static void node_composit_set_butfunc(bNodeType *ntype)
- {
-@@ -2958,6 +2969,9 @@ static void node_composit_set_butfunc(bNodeType *ntype)
-     case CMP_NODE_DENOISE:
-       ntype->draw_buttons = node_composit_buts_denoise;
-       break;
-+    case CMP_NODE_SIRDS:
-+      ntype->draw_buttons = node_composit_buts_sirds;
-+      break;
-   }
- }
- 
++}  // namespace blender::compositor
+\ No newline at end of file
 diff --git a/source/blender/makesdna/DNA_node_types.h b/source/blender/makesdna/DNA_node_types.h
-index 1d76ebdff2c..52522d08ce9 100644
+index 9e4505ca529..c35b007ba80 100644
 --- a/source/blender/makesdna/DNA_node_types.h
 +++ b/source/blender/makesdna/DNA_node_types.h
-@@ -1056,6 +1056,16 @@ typedef struct NodeDenoise {
-   char _pad[7];
- } NodeDenoise;
+@@ -1298,6 +1298,16 @@ typedef struct NodeMapRange {
+   char _pad[5];
+ } NodeMapRange;
  
 +typedef struct NodeSIRDS {
 +  float clip_near;
@@ -691,10 +606,10 @@ index 1d76ebdff2c..52522d08ce9 100644
 +  int flag;
 +} NodeSIRDS;
 +
- /* script node mode */
- #define NODE_SCRIPT_INTERNAL 0
- #define NODE_SCRIPT_EXTERNAL 1
-@@ -1393,6 +1403,12 @@ enum {
+ typedef struct NodeRandomValue {
+   /* eCustomDataType. */
+   uint8_t data_type;
+@@ -2103,6 +2113,12 @@ enum {
    CMP_NODEFLAG_STABILIZE_INVERSE = 1,
  };
  
@@ -704,14 +619,14 @@ index 1d76ebdff2c..52522d08ce9 100644
 +  CMP_NODEFLAG_SIRDS_ELASTIC = 2,
 +};
 +
- #define CMP_NODE_PLANETRACKDEFORM_MBLUR_SAMPLES_MAX 64
+ /* Set Alpha Node. */
  
- /* Point Density shader node */
+ /** #NodeSetAlpha.mode */
 diff --git a/source/blender/makesrna/intern/rna_nodetree.c b/source/blender/makesrna/intern/rna_nodetree.c
-index 8c99a4cc1a1..2579105f577 100644
+index 12d4827bd9b..146a07c67e8 100644
 --- a/source/blender/makesrna/intern/rna_nodetree.c
 +++ b/source/blender/makesrna/intern/rna_nodetree.c
-@@ -8102,6 +8102,35 @@ static void def_cmp_denoise(StructRNA *srna)
+@@ -9276,6 +9276,35 @@ static void def_cmp_antialiasing(StructRNA *srna)
    RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
  }
  
@@ -747,89 +662,114 @@ index 8c99a4cc1a1..2579105f577 100644
  /* -- Texture Nodes --------------------------------------------------------- */
  
  static void def_tex_output(StructRNA *srna)
-diff --git a/source/blender/nodes/CMakeLists.txt b/source/blender/nodes/CMakeLists.txt
-index 4172dc06a9f..09d0e3e61fb 100644
---- a/source/blender/nodes/CMakeLists.txt
-+++ b/source/blender/nodes/CMakeLists.txt
-@@ -109,6 +109,7 @@ set(SRC
-   composite/nodes/node_composite_sepcombYCCA.c
-   composite/nodes/node_composite_sepcombYUVA.c
-   composite/nodes/node_composite_setalpha.c
-+  composite/nodes/node_composite_sirds.c
-   composite/nodes/node_composite_splitViewer.c
-   composite/nodes/node_composite_stabilize2d.c
-   composite/nodes/node_composite_sunbeams.c
-diff --git a/source/blender/nodes/NOD_composite.h b/source/blender/nodes/NOD_composite.h
-index 99bcb849ebd..289b3383042 100644
---- a/source/blender/nodes/NOD_composite.h
-+++ b/source/blender/nodes/NOD_composite.h
-@@ -78,6 +78,7 @@ void register_node_type_cmp_inpaint(void);
- void register_node_type_cmp_despeckle(void);
- void register_node_type_cmp_defocus(void);
- void register_node_type_cmp_denoise(void);
-+void register_node_type_cmp_sirds(void);
- 
- void register_node_type_cmp_valtorgb(void);
- void register_node_type_cmp_rgbtobw(void);
 diff --git a/source/blender/nodes/NOD_static_types.h b/source/blender/nodes/NOD_static_types.h
-index 7922a73902c..f7c88d2b924 100644
+index cb97e88ac9f..a5d5d023842 100644
 --- a/source/blender/nodes/NOD_static_types.h
 +++ b/source/blender/nodes/NOD_static_types.h
-@@ -222,6 +222,7 @@ DefNode(CompositorNode, CMP_NODE_CORNERPIN,      0,                      "CORNER
- DefNode(CompositorNode, CMP_NODE_SUNBEAMS,       def_cmp_sunbeams,       "SUNBEAMS",       SunBeams,         "Sun Beams",         ""              )
- DefNode(CompositorNode, CMP_NODE_CRYPTOMATTE,    def_cmp_cryptomatte,    "CRYPTOMATTE",    Cryptomatte,      "Cryptomatte",       ""              )
- DefNode(CompositorNode, CMP_NODE_DENOISE,        def_cmp_denoise,        "DENOISE",        Denoise,          "Denoise",           ""              )
+@@ -223,6 +223,7 @@ DefNode(CompositorNode, CMP_NODE_COMBINE_XYZ,    0,                      "COMBIN
+ DefNode(CompositorNode, CMP_NODE_SEPARATE_XYZ,   0,                      "SEPARATE_XYZ",   SeparateXYZ,      "Separate XYZ",      ""              )
+ DefNode(CompositorNode, CMP_NODE_SEPARATE_COLOR, def_cmp_combsep_color,  "SEPARATE_COLOR", SeparateColor,    "Separate Color",    ""              )
+ DefNode(CompositorNode, CMP_NODE_COMBINE_COLOR,  def_cmp_combsep_color,  "COMBINE_COLOR",  CombineColor,     "Combine Color",     ""              )
 +DefNode(CompositorNode, CMP_NODE_SIRDS,          def_cmp_sirds,          "SIRDS",          SIRDS,            "SIRDS",             ""              )
  
  DefNode(TextureNode,    TEX_NODE_OUTPUT,         def_tex_output,         "OUTPUT",         Output,           "Output",            ""              )
  DefNode(TextureNode,    TEX_NODE_CHECKER,        0,                      "CHECKER",        Checker,          "Checker",           ""              )
-diff --git a/source/blender/nodes/composite/nodes/node_composite_sirds.c b/source/blender/nodes/composite/nodes/node_composite_sirds.c
+diff --git a/source/blender/nodes/composite/CMakeLists.txt b/source/blender/nodes/composite/CMakeLists.txt
+index 6fb4e9ba753..f9df0477482 100644
+--- a/source/blender/nodes/composite/CMakeLists.txt
++++ b/source/blender/nodes/composite/CMakeLists.txt
+@@ -105,6 +105,7 @@ set(SRC
+   nodes/node_composite_sepcomb_ycca.cc
+   nodes/node_composite_sepcomb_yuva.cc
+   nodes/node_composite_setalpha.cc
++  nodes/node_composite_sirds.cc
+   nodes/node_composite_split_viewer.cc
+   nodes/node_composite_stabilize2d.cc
+   nodes/node_composite_sunbeams.cc
+diff --git a/source/blender/nodes/composite/node_composite_register.cc b/source/blender/nodes/composite/node_composite_register.cc
+index 38796cbea60..84b01647cab 100644
+--- a/source/blender/nodes/composite/node_composite_register.cc
++++ b/source/blender/nodes/composite/node_composite_register.cc
+@@ -92,6 +92,7 @@ void register_composite_nodes()
+   register_node_type_cmp_sepycca();
+   register_node_type_cmp_sepyuva();
+   register_node_type_cmp_setalpha();
++  register_node_type_cmp_sirds();
+   register_node_type_cmp_splitviewer();
+   register_node_type_cmp_stabilize2d();
+   register_node_type_cmp_sunbeams();
+diff --git a/source/blender/nodes/composite/node_composite_register.hh b/source/blender/nodes/composite/node_composite_register.hh
+index f15a71cfae1..5495fb8fd03 100644
+--- a/source/blender/nodes/composite/node_composite_register.hh
++++ b/source/blender/nodes/composite/node_composite_register.hh
+@@ -88,6 +88,7 @@ void register_node_type_cmp_seprgba();
+ void register_node_type_cmp_sepycca();
+ void register_node_type_cmp_sepyuva();
+ void register_node_type_cmp_setalpha();
++void register_node_type_cmp_sirds();
+ void register_node_type_cmp_splitviewer();
+ void register_node_type_cmp_stabilize2d();
+ void register_node_type_cmp_sunbeams();
+diff --git a/source/blender/nodes/composite/nodes/node_composite_sirds.cc b/source/blender/nodes/composite/nodes/node_composite_sirds.cc
 new file mode 100644
-index 00000000000..9da8d0953f9
+index 00000000000..67cbcf4e647
 --- /dev/null
-+++ b/source/blender/nodes/composite/nodes/node_composite_sirds.c
-@@ -0,0 +1,60 @@
-+/*
-+ * This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License
-+ * as published by the Free Software Foundation; either version 2
-+ * of the License, or (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful,
-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+ * GNU General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software Foundation,
-+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-+ *
-+ * The Original Code is Copyright (C) 2019 Blender Foundation.
-+ * All rights reserved.
-+ *
-+ * The Original Code is: all of this file.
-+ */
++++ b/source/blender/nodes/composite/nodes/node_composite_sirds.cc
+@@ -0,0 +1,110 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright 2006 Blender Foundation. All rights reserved. */
 +
 +/** \file
 + * \ingroup cmpnodes
 + */
 +
-+#include "node_composite_util.h"
++#include "UI_interface.h"
++#include "UI_resources.h"
 +
-+static bNodeSocketTemplate cmp_node_sirds_in[] = {
-+    {SOCK_RGBA, N_("Pattern"), 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
-+    {SOCK_FLOAT, N_("Depth"), 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, PROP_NONE, SOCK_HIDE_VALUE},
-+    {SOCK_FLOAT, N_("Clip Start"), 5.0f, 0.0f, 0.0f, 0.0f, 0.0001f, 10000, PROP_DISTANCE},
-+    {SOCK_FLOAT, N_("Clip End"), 10.0f, 0.0f, 0.0f, 0.0f, 0.0001f, 10000, PROP_DISTANCE},
-+    {SOCK_FLOAT, N_("Camera FOV"), 0.691112f, 0.0f, 0.0f, 0.0f, 0.0001f, 3.14f, PROP_ANGLE},
-+    {SOCK_FLOAT, N_("Center"), 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, PROP_FACTOR},
-+    {-1, ""}};
-+static bNodeSocketTemplate cmp_node_sirds_out[] = {
-+    {SOCK_RGBA, N_("Image")}, {-1, ""}};
++#include "COM_node_operation.hh"
 +
-+static void node_composit_init_sirds(bNodeTree *UNUSED(ntree), bNode *node)
++#include "node_composite_util.hh"
++
++namespace blender::nodes::node_composite_sirds_cc {
++
++static void cmp_node_sirds_declare(NodeDeclarationBuilder &b)
 +{
-+  NodeSIRDS *nsirds = MEM_callocN(sizeof(NodeSIRDS), "node sirds data");
++  b.add_input<decl::Color>(N_("Pattern"))
++      .default_value({1.0f, 1.0f, 1.0f, 1.0f})
++      .compositor_domain_priority(1);
++  b.add_input<decl::Float>(N_("Depth"))
++      .default_value(0.0f)
++      .subtype(PROP_NONE)
++      .compositor_domain_priority(0);
++  b.add_input<decl::Float>(N_("Clip Start"))
++      .default_value(5.0f)
++      .min(0.0001f)
++      .max(10000.0f)
++      .subtype(PROP_DISTANCE)
++      .compositor_expects_single_value();
++  b.add_input<decl::Float>(N_("Clip End"))
++      .default_value(10.0f)
++      .min(0.0001f)
++      .max(10000.0f)
++      .subtype(PROP_DISTANCE)
++      .compositor_expects_single_value();
++  b.add_input<decl::Float>(N_("Camera FOV"))
++      .default_value(0.691112f)
++      .min(0.0001f)
++      .max(3.14f)
++      .subtype(PROP_ANGLE)
++      .compositor_expects_single_value();
++  b.add_input<decl::Float>(N_("Center"))
++      .default_value(0.5f)
++      .min(0.0f)
++      .max(1.0f)
++      .compositor_domain_priority(1);
++  b.add_output<decl::Color>(N_("Image"));
++}
++
++static void node_composit_init_sirds(bNodeTree * /*ntree*/, bNode *node)
++{
++  NodeSIRDS *nsirds = (NodeSIRDS *)MEM_callocN(sizeof(NodeSIRDS), "node sirds data");
 +  nsirds->clip_far = 5.0f;
 +  nsirds->clip_near = 0.5f;
 +  nsirds->camera_fov = 0.691112f; /* Default startup camera FOV */
@@ -838,14 +778,51 @@ index 00000000000..9da8d0953f9
 +  node->storage = nsirds;
 +}
 +
++static void node_composit_buts_sirds(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
++{
++  uiLayout *col = uiLayoutColumn(layout, true);
++  uiItemR(col, ptr, "view_width", 0, NULL, ICON_NONE);
++  uiItemR(col, ptr, "view_distance", 0, NULL, ICON_NONE);
++
++  col = uiLayoutColumn(layout, true);
++  uiItemR(col, ptr, "elastic", 0, NULL, ICON_NONE);
++  uiItemR(col, ptr, "invert_z", 0, NULL, ICON_NONE);
++}
++
++using namespace blender::realtime_compositor;
++
++class SIRDSOperation : public NodeOperation {
++ public:
++  using NodeOperation::NodeOperation;
++
++  void execute() override
++  {
++    get_result("Image").allocate_invalid();
++    context().set_info_message("Viewport compositor setup not fully supported");
++  }
++};
++
++static NodeOperation *get_compositor_operation(Context &context, DNode node)
++{
++  return new SIRDSOperation(context, node);
++}
++
++}  // namespace blender::nodes::node_composite_sirds_cc
++
 +void register_node_type_cmp_sirds(void)
 +{
++  namespace file_ns = blender::nodes::node_composite_sirds_cc;
++
 +  static bNodeType ntype;
 +
-+  cmp_node_type_base(&ntype, CMP_NODE_SIRDS, "SIRDS", NODE_CLASS_OP_FILTER, 0);
-+  node_type_socket_templates(&ntype, cmp_node_sirds_in, cmp_node_sirds_out);
-+  node_type_init(&ntype, node_composit_init_sirds);
++  cmp_node_type_base(&ntype, CMP_NODE_SIRDS, "SIRDS", NODE_CLASS_OP_FILTER);
++  ntype.declare = file_ns::cmp_node_sirds_declare;
++  ntype.draw_buttons = file_ns::node_composit_buts_sirds;
++  ntype.initfunc = file_ns::node_composit_init_sirds;
 +  node_type_storage(&ntype, "NodeSIRDS", node_free_standard_storage, node_copy_standard_storage);
++  ntype.get_compositor_operation = file_ns::get_compositor_operation;
++  ntype.realtime_compositor_unsupported_message = N_(
++      "Node not supported in the Viewport compositor");
 +
 +  nodeRegisterType(&ntype);
 +}
